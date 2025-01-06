@@ -19,9 +19,9 @@ mask = np.ones_like(image, dtype='uint8')
 for pc in pc_values:
     resolution = 8.42 #micron
     sigma = 26 #mN/m
-    kernel_size = round((((2*sigma*(math.cos(math.radians(0))))/pc)*1000/resolution))/2
+    kernel_size = round((((2*sigma*(math.cos(math.radians(0))))/pc)*1000/resolution))
     ball = ski.morphology.ball(kernel_size, dtype=np.uint8)
-    kernel_size_nwp = round((((2*sigma)/pc)*1000/resolution)/2)
+    kernel_size_nwp = round((((2*sigma)/pc)*1000/resolution))
     ball_nwp = ski.morphology.ball(kernel_size_nwp, dtype=np.uint8)
 
     grain_dilation = ski.morphology.binary_dilation(image, footprint=ball)
