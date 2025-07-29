@@ -1,0 +1,15 @@
+# Input parameters for PMM.py
+# pore = 0, solid = 1
+
+filename = domain.raw    # Path to the segmented micro-ct image    
+filesize_x = 751         # Voxels
+filesize_y = 751         
+filesize_z = 572         
+
+resolution = 8.42        # Microns per voxel
+sigma = 26               # Interfacial tension (mN/m)
+theta = 0                # Contact angle (degrees)
+num_threads = 12         # Number of CPU cores to use
+kernel_search = true     # true: search for kernel size using starting_sat; false: start from starting_kernel
+starting_kernel = 20     # used only if kernel_search=false
+starting_sat = 0.95      # used only if kernel_search=true
