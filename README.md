@@ -13,7 +13,7 @@ The code generates capillary-pressure curves by performing morphological operati
 * Parallel processing with automatic halo handling (split-volume strategy).
 * Adaptive kernel search to reach a target (starting) wetting-phase saturation.
 * Support for starting kernel runs when a search is not required.
-* Trapped non-wetting phase detection following the algorithm in the paper.
+* Trapped wetting phase detection following the algorithm in the paper.
 
 ---
 
