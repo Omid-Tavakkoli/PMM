@@ -44,6 +44,7 @@ required_keys = [
 kernel_search_flag = params.get("kernel_search", "true").strip().lower() == "true"
 starting_kernel_param = params.get("starting_kernel")
 starting_sat_param = params.get("starting_sat")
+visualization_flag = params.get("visualization", "true").strip().lower() == "true"
 missing = [k for k in required_keys if k not in params]
 if missing:
     raise ValueError(
@@ -409,9 +410,10 @@ if __name__ == "__main__":
     kernel_list.append(k_best)
     sat_list.append(sat_full)
 
-    out_name = f"result_sat{sat_full:.4f}.raw"
-    comb_full.astype(np.uint8).tofile(out_name)
-    print(f"Saved result to {out_name}")
+    if visualization_flag:
+        out_name = f"result_sat{sat_full:.4f}.raw"
+        comb_full.astype(np.uint8).tofile(out_name)
+        print(f"Saved result to {out_name}")
 
     # 4) Decrease kernel size until saturation no longer changes
     current_k = k_best
@@ -419,9 +421,12 @@ if __name__ == "__main__":
     while current_k > 1:
         next_k = current_k - 1
         sat_next, comb_next, mask_global = compute_saturation_parallel(domain_full, next_k, theta, num_workers, mask_global)
-        out_name = f"result_sat{sat_next:.4f}.raw"
-        comb_next.astype(np.uint8).tofile(out_name)
-        print(f"Kernel {next_k} -> sat {sat_next:.4f} (saved {out_name})")
+        if visualization_flag:
+            out_name = f"result_sat{sat_next:.4f}.raw"
+            comb_next.astype(np.uint8).tofile(out_name)
+            print(f"Kernel {next_k} -> sat {sat_next:.4f} (saved {out_name})")
+        else:
+            print(f"Kernel {next_k} -> sat {sat_next:.4f}")
 
         # Record for plot
         kernel_list.append(next_k)
@@ -451,6 +456,16 @@ if __name__ == "__main__":
     plot_name = "saturation_vs_pc.pdf"
     plt.savefig(plot_name, dpi=300)
     print(f"Plot saved to {plot_name}")
+
+    # -----------------------------------------------------------
+    # Write numeric results to text file (Pc  Saturation)
+    # -----------------------------------------------------------
+    with open("result.txt", "w") as fp:
+        fp.write("Pc(Pa)\t\tSw\n")
+        for pc, sw in zip(pc_list, sat_list):
+            fp.write(f"{pc:.6f}\t\t{sw:.6f}\n")
+        print("Numeric results saved to result.txt")
+
     plt.show()
 
     print("Done.")
