@@ -1,10 +1,10 @@
 # Pore-Morphology-Method (PMM)
 
-This repository contains the **Pore-Morphology Method (PMM)** to simualte drainage process in porous media. For detailed methodology explanation see:
+This repository contains the **Pore-Morphology Method (PMM)** to simulate drainage process in porous media. For detailed methodology explanation see:
 
-> Tavakkoli, O., Ebadi, M., Da Wang, Y., Mostaghimi, P., Armstrong, R.T., 2025. “Assessment of wetting conditions in quasistatic drainage model ing using a pore morphology method and j-function wettability estimator.” *International Journal of Multiphase Flow* **183**:105067. [doi:10.1016/j.ijmultiphaseflow.2024.105067](https://doi.org/10.1016/j.ijmultiphaseflow.2024.105067)
+> Tavakkoli, O., Ebadi, M., Da Wang, Y., Mostaghimi, P., Armstrong, R.T., 2025. "Assessment of wetting conditions in quasistatic drainage modeling using a pore morphology method and j-function wettability estimator." *International Journal of Multiphase Flow* **183**:105067. [doi:10.1016/j.ijmultiphaseflow.2024.105067](https://doi.org/10.1016/j.ijmultiphaseflow.2024.105067)
 
-The code generates capillary-pressure curves by performing morphological operation on 3D segmented micro-ct images, using an adaptive, parallel kernel-size sweep and trapped wetting phase identification.
+The code generates capillary-pressure curves by performing morphological operation on 3D segmented micro-CT images, using an adaptive, parallel kernel-size sweep and trapped wetting phase identification.
 
 ---
 
@@ -15,6 +15,7 @@ The code generates capillary-pressure curves by performing morphological operati
 * Support for starting kernel runs when a search is not required.
 * Trapped non-wetting phase detection following the algorithm in the paper.
 
+---
 
 ## Input files
 
@@ -43,6 +44,7 @@ num_threads    = 12                # CPU cores to use
 kernel_search  = true              # true: search, false: starting kernel
 starting_sat   = 0.95              # starting saturation if search is enabled
 starting_kernel = 20               # used only if kernel_search = false
+visualization  = true              # true: save .RAW fluid distribution per saturation step, false: skip saving
 ```
 
 ---
@@ -52,14 +54,16 @@ starting_kernel = 20               # used only if kernel_search = false
 ```bash
 python PMM.py
 ```
+
 ---
 
 ## Output files
 
 | File | Description |
 |------|-------------|
-| `result_sat<sat>.raw` | fluid distribution (uint8) for each saturation step. |
+| `result_sat<sat>.raw` | Fluid distribution (uint8) for each saturation step (if `visualization = true`). |
 | `saturation_vs_pc.pdf` | Capillary pressure curve generated at the end of the run. |
+| `result.txt` | Tab-separated values of capillary pressure (Pa) and corresponding saturation. |
 
 ---
 
