@@ -4,6 +4,7 @@ import numpy as np
 from skimage import measure
 import skimage as ski
 import math
+import os
 import multiprocessing as mp
 from typing import Tuple
 
@@ -64,6 +65,16 @@ theta      = float(params["theta"])        # degrees
 
 # Calculate the total number of elements in the matrix
 total_elements = depth * height * width
+
+
+file_size_bytes = os.path.getsize(file_path)
+expected_bytes  = total_elements  # uint8 → 1 byte per voxel
+
+if file_size_bytes != expected_bytes:
+    raise ValueError(
+        "Image dimension error: 'filesize_x/y/z' in input.txt do not match the actual RAW file size. "
+        f"Expected {expected_bytes} bytes, got {file_size_bytes} bytes."
+    )
 
 # Read raw binary data from the file
 with open(file_path, 'rb') as file:
@@ -299,12 +310,13 @@ def find_best_kernel_size(
     target_sat: float,
     theta: float,
     num_workers: int,
-    initial_k: int = 20,
+    initial_k: int = 18,
     tol: float = 1e-4,
     max_kernel_size: int = 200,
 ):
     """Search for kernel size yielding *target_sat* starting from *initial_k*."""
     k = initial_k
+    step = 1  # initialize step to a positive value for first iteration
     best_k = k
     best_diff = float("inf")
     tested = set()
@@ -314,6 +326,40 @@ def find_best_kernel_size(
         tested.add(k)
         diff = abs(sat - target_sat)
         print(f"Kernel {k} -> sat {sat:.4f} (diff {diff:.4f})")
+
+        # ------------------------------------------------------------------
+        # Determine step to take *before* deciding on overshoot refinement
+        # ------------------------------------------------------------------
+        gap = target_sat - sat
+
+        def _step_from_abs(g: float) -> int:
+            if g > 0.95:
+                return 20
+            elif g > 0.8:
+                return 16
+            elif g > 0.6:
+                return 14
+            elif g > 0.5:
+                return 12
+            elif g > 0.4:
+                return 10
+            elif g > 0.3:
+                return 8
+            elif g > 0.2:
+                return 6
+            elif g > 0.1:
+                return 4
+            elif g > 0.05:
+                return 2
+            else:
+                return 1
+
+        step_mag = _step_from_abs(abs(gap))
+        step_candidate = step_mag if gap > 0 else -step_mag
+
+        # ------------------------------------------------------------------
+        # Update best diff
+        # ------------------------------------------------------------------
         if diff < tol:
             best_k = k
             best_diff = diff
@@ -321,7 +367,11 @@ def find_best_kernel_size(
         if diff < best_diff:
             best_diff = diff
             best_k = k
-        if sat >= target_sat:
+
+        # ------------------------------------------------------------------
+        # Overshoot refinement
+        # ------------------------------------------------------------------
+        if sat >= target_sat and step_candidate > 0:
             # Downward scan
             for kk in range(k - 1, 0, -1):
                 if kk in tested:
@@ -335,29 +385,34 @@ def find_best_kernel_size(
                 if diff_k > best_diff:
                     break
             break
-        # Adaptive step size
-        gap = target_sat - sat
-        if gap > 0.95:
-            step = 20
-        elif gap > 0.8:
-            step = 16
-        elif gap > 0.6:
-            step = 14
-        elif gap > 0.5:
-            step = 12
-        elif gap > 0.4:
-            step = 10
-        elif gap > 0.3:
-            step = 8
-        elif gap > 0.2:
-            step = 6
-        elif gap > 0.1:
-            step = 4
-        elif gap > 0.05:
-            step = 2
-        else:
-            step = 1
+        elif sat <= target_sat and step_candidate < 0:
+            # Upward scan (symmetric logic)
+            consecutive_worse = 0
+            prev_diff = diff
+            for k_up in range(k + 1, max_kernel_size + 1):
+                if k_up in tested:
+                    continue
+                sat_up, _, _ = compute_saturation_parallel(domain_test, k_up, theta, num_workers)
+                tested.add(k_up)
+                diff_up = abs(sat_up - target_sat)
+                print(f"  Upward   {k_up} -> sat {sat_up:.4f} (diff {diff_up:.4f})")
 
+                if diff_up < best_diff:
+                    best_diff = diff_up
+                    best_k = k_up
+
+                if diff_up > prev_diff:
+                    consecutive_worse += 1
+                    if consecutive_worse >= 2:
+                        print("Stopping upward search")
+                        break
+                else:
+                    consecutive_worse = 0
+
+                prev_diff = diff_up
+            break
+        # Advance kernel size
+        step = step_candidate
         k += step
     return best_k, best_diff
 
@@ -387,7 +442,7 @@ if __name__ == "__main__":
         target_sat = float(starting_sat_param)  # ratio (not %)
 
         print(f"Finding kernel size to start the simulation from saturation {target_sat} ...")
-        k_best, diff_best = find_best_kernel_size(domain_full, target_sat, theta, num_workers, initial_k=20)
+        k_best, diff_best = find_best_kernel_size(domain_full, target_sat, theta, num_workers, initial_k=18)
         print("=" * 50)
         print(f"Chosen kernel size to start the simulation: {k_best} (diff {diff_best:.4f})")
     else:
