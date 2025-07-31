@@ -80,6 +80,11 @@ if file_size_bytes != expected_bytes:
 with open(file_path, 'rb') as file:
     raw_data = np.fromfile(file, dtype=np.uint8, count=total_elements)
 
+print("Image loaded successfully")
+porosity = np.sum(raw_data == 0) / (np.sum(raw_data == 0) + np.sum(raw_data == 1))
+print(f"Porous domain porosity: {porosity:.4f}")
+print("=====================================")
+
 # Reshape the 1D array into a 3D matrix
 image = raw_data.reshape((depth, height, width))  # 'image' kept for backward compatibility but unused below
 
@@ -426,6 +431,19 @@ if __name__ == "__main__":
     # Read configuration (already parsed above)
     num_workers = int(params.get("num_threads", mp.cpu_count()))
 
+    print_config_strings = [
+        "input parameters loaded from input.txt",
+        "Input Parameters:",
+        f"Input file: {params['filename']}",
+        f"File size: {width} x {height} x {depth}",
+        f"IFT (sigma): {sigma} mN/m",
+        f"Contact angle (theta): {theta} degrees",
+        f"Image resolution: {resolution} micro meter",
+        f"Num threads = {params.get('num_threads', 'auto')}",
+        "===================================="
+    ]
+    print("\n".join(print_config_strings))
+
     # 1) Load image volume
     with open(file_path, "rb") as f:
         raw_data = np.fromfile(f, dtype=np.uint8, count=total_elements)
@@ -450,7 +468,7 @@ if __name__ == "__main__":
             raise ValueError("'starting_kernel' must be provided in input.txt when kernel_search = false")
         k_best = int(starting_kernel_param)
         print(f"Skipping kernel search. Simualting kernel size = {k_best} on full domain")
-        print("=" * 50)
+        print("=" * 55)
 
     # 3) Apply kernel size to full domain
     mask_global = np.ones_like(domain_full, dtype=np.uint8)
@@ -516,6 +534,20 @@ if __name__ == "__main__":
     # Write numeric results to text file (Pc  Saturation)
     # -----------------------------------------------------------
     with open("result.txt", "w") as fp:
+        # Header information
+        fp.write("input parameters loaded from input.txt\n")
+        fp.write("Input Parameters:\n")
+        fp.write(f"Input file: {file_path}\n")
+        fp.write(f"File size: {width} x {height} x {depth}\n")
+        fp.write(f"IFT (sigma): {sigma} mN/m\n")
+        fp.write(f"Contact angle (theta): {theta} degrees\n")
+        fp.write(f"Image resolution: {resolution} micro meter\n")
+        fp.write(f"Num threads = {num_workers}\n")
+        fp.write("====================================\n")
+        fp.write(f"Porous domain porosity: {porosity:.4f}\n")
+        fp.write("====================================\n")
+
+        # Data table
         fp.write("Pc(Pa)\t\tSw\n")
         for pc, sw in zip(pc_list, sat_list):
             fp.write(f"{pc:.6f}\t\t{sw:.6f}\n")
