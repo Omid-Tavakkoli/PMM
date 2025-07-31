@@ -310,7 +310,7 @@ def find_best_kernel_size(
     target_sat: float,
     theta: float,
     num_workers: int,
-    initial_k: int = 18,
+    initial_k: int = 20,
     tol: float = 1e-4,
     max_kernel_size: int = 200,
 ):
@@ -442,7 +442,7 @@ if __name__ == "__main__":
         target_sat = float(starting_sat_param)  # ratio (not %)
 
         print(f"Finding kernel size to start the simulation from saturation {target_sat} ...")
-        k_best, diff_best = find_best_kernel_size(domain_full, target_sat, theta, num_workers, initial_k=18)
+        k_best, diff_best = find_best_kernel_size(domain_full, target_sat, theta, num_workers, initial_k=20)
         print("=" * 50)
         print(f"Chosen kernel size to start the simulation: {k_best} (diff {diff_best:.4f})")
     else:
