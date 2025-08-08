@@ -6,6 +6,7 @@ import skimage as ski
 import math
 import os
 import multiprocessing as mp
+import sys
 from typing import Tuple
 
 sns.set(style="white")
@@ -28,65 +29,63 @@ def read_input_params(path="input.txt"):
         raise FileNotFoundError(f"Configuration file '{path}' not found. The script requires this file with all parameters.") from e
     return params
 
-# Load simulation parameters
-params = read_input_params()
+def _validate_and_read_input():
+    """Read params and raw volume, validate sizes; return a dict of runtime inputs."""
+    params = read_input_params()
 
-# Validate required parameters
-required_keys = [
-    "filename",
-    "filesize_x",
-    "filesize_y",
-    "filesize_z",
-    "resolution",
-    "sigma",
-    "theta",
-]
-# Optional config flags
-kernel_search_flag = params.get("kernel_search", "true").strip().lower() == "true"
-starting_kernel_param = params.get("starting_kernel")
-starting_sat_param = params.get("starting_sat")
-visualization_flag = params.get("visualization", "true").strip().lower() == "true"
-missing = [k for k in required_keys if k not in params]
-if missing:
-    raise ValueError(
-        f"Missing required keys in input.txt: {', '.join(missing)}"
-    )
+    required_keys = [
+        "filename",
+        "filesize_x",
+        "filesize_y",
+        "filesize_z",
+        "resolution",
+        "sigma",
+        "theta",
+    ]
+    missing = [k for k in required_keys if k not in params]
+    if missing:
+        raise ValueError(
+            f"Missing required keys in input.txt: {', '.join(missing)}"
+        )
 
-file_path = params["filename"]
-# Dimensions of the 3D domain (x = width, y = height, z = depth)
-width  = int(params["filesize_x"])
-height = int(params["filesize_y"])
-depth  = int(params["filesize_z"])
+    file_path = params["filename"]
+    width = int(params["filesize_x"])   # x = width
+    height = int(params["filesize_y"])  # y = height
+    depth = int(params["filesize_z"])   # z = depth
 
-# Physical parameters
-resolution = float(params["resolution"])   # micron per voxel
-sigma      = float(params["sigma"])        # mN/m
-theta      = float(params["theta"])        # degrees
+    resolution = float(params["resolution"])   # micron per voxel
+    sigma = float(params["sigma"])             # mN/m
+    theta = float(params["theta"])             # degrees
 
-# Calculate the total number of elements in the matrix
-total_elements = depth * height * width
+    total_elements = depth * height * width
+    file_size_bytes = os.path.getsize(file_path)
+    expected_bytes = total_elements  # uint8 → 1 byte per voxel
+    if file_size_bytes != expected_bytes:
+        raise ValueError(
+            "Image dimension error: 'filesize_x/y/z' in input.txt do not match the actual RAW file size. "
+            f"Expected {expected_bytes} bytes, got {file_size_bytes} bytes."
+        )
 
+    with open(file_path, "rb") as f:
+        raw_data = np.fromfile(f, dtype=np.uint8, count=total_elements)
 
-file_size_bytes = os.path.getsize(file_path)
-expected_bytes  = total_elements  # uint8 → 1 byte per voxel
+    porosity = np.sum(raw_data == 0) / (np.sum(raw_data == 0) + np.sum(raw_data == 1))
+    domain_full = raw_data.reshape((depth, height, width))
+    domain_full[domain_full == 2] = 1  # normalize if present
 
-if file_size_bytes != expected_bytes:
-    raise ValueError(
-        "Image dimension error: 'filesize_x/y/z' in input.txt do not match the actual RAW file size. "
-        f"Expected {expected_bytes} bytes, got {file_size_bytes} bytes."
-    )
-
-# Read raw binary data from the file
-with open(file_path, 'rb') as file:
-    raw_data = np.fromfile(file, dtype=np.uint8, count=total_elements)
-
-print("Image loaded successfully")
-porosity = np.sum(raw_data == 0) / (np.sum(raw_data == 0) + np.sum(raw_data == 1))
-print(f"Porous domain porosity: {porosity:.4f}")
-print("=====================================")
-
-# Reshape the 1D array into a 3D matrix
-image = raw_data.reshape((depth, height, width))  # 'image' kept for backward compatibility but unused below
+    return {
+        "params": params,
+        "file_path": file_path,
+        "width": width,
+        "height": height,
+        "depth": depth,
+        "resolution": resolution,
+        "sigma": sigma,
+        "theta": theta,
+        "total_elements": total_elements,
+        "porosity": porosity,
+        "domain_full": domain_full,
+    }
 
 # --------------------------------------------------------------------------------------
 # Fast structuring-element cache and multi-pass morphology utilities
@@ -421,44 +420,45 @@ def find_best_kernel_size(
         k += step
     return best_k, best_diff
 
-# --------------------------------------------------------------------------------------
-# MAIN WORKFLOW
-# --------------------------------------------------------------------------------------
+def main():
+    # Read configuration and input data
+    runtime = _validate_and_read_input()
+    params = runtime["params"]
+    file_path = runtime["file_path"]
+    width = runtime["width"]
+    height = runtime["height"]
+    depth = runtime["depth"]
+    resolution = runtime["resolution"]
+    sigma = runtime["sigma"]
+    theta = runtime["theta"]
+    porosity = runtime["porosity"]
+    domain_full = runtime["domain_full"]
 
-if __name__ == "__main__":
-    mp.set_start_method("fork", force=True)
+    kernel_search_flag = params.get("kernel_search", "true").strip().lower() == "true"
+    starting_kernel_param = params.get("starting_kernel")
+    starting_sat_param = params.get("starting_sat")
+    visualization_flag = params.get("visualization", "true").strip().lower() == "true"
 
-    # Read configuration (already parsed above)
     num_workers = int(params.get("num_threads", mp.cpu_count()))
 
-    print_config_strings = [
-        "input parameters loaded from input.txt",
-        "Input Parameters:",
-        f"Input file: {params['filename']}",
-        f"File size: {width} x {height} x {depth}",
-        f"IFT (sigma): {sigma} mN/m",
-        f"Contact angle (theta): {theta} degrees",
-        f"Image resolution: {resolution} micro meter",
-        f"Num threads = {params.get('num_threads', 'auto')}",
-        "===================================="
-    ]
-    print("\n".join(print_config_strings))
-
-    # 1) Load image volume
-    with open(file_path, "rb") as f:
-        raw_data = np.fromfile(f, dtype=np.uint8, count=total_elements)
-    domain_full = raw_data.reshape((depth, height, width))
-    del raw_data
-
-    # Phase values (pore=0, solid=1)
-    domain_full[domain_full == 2] = 1  # if present
+    print("input parameters loaded from input.txt")
+    print("Input Parameters:")
+    print(f"Input file: {file_path}")
+    print(f"File size: {width} x {height} x {depth}")
+    print(f"IFT (sigma): {sigma} mN/m")
+    print(f"Contact angle (theta): {theta} degrees")
+    print(f"Image resolution: {resolution} micro meter")
+    print(f"Num threads = {params.get('num_threads', 'auto')}")
+    print("====================================")
+    print("Image loaded successfully")
+    print(f"Porous domain porosity: {porosity:.4f}")
+    print("=====================================")
 
     # Decide initial kernel size
     if kernel_search_flag:
         if starting_sat_param is None:
             raise ValueError("'starting_sat' must be provided in input.txt when kernel_search = true")
-        target_sat = float(starting_sat_param)  # ratio (not %)
-
+        target_sat = float(starting_sat_param)
         print(f"Finding kernel size to start the simulation from saturation {target_sat} ...")
         k_best, diff_best = find_best_kernel_size(domain_full, target_sat, theta, num_workers, initial_k=20)
         print("=" * 50)
@@ -470,25 +470,21 @@ if __name__ == "__main__":
         print(f"Skipping kernel search. Simualting kernel size = {k_best} on full domain")
         print("=" * 55)
 
-    # 3) Apply kernel size to full domain
+    # Apply kernel size to full domain
     mask_global = np.ones_like(domain_full, dtype=np.uint8)
     sat_full, comb_full, mask_global = compute_saturation_parallel(domain_full, k_best, theta, num_workers, mask_global)
     print(f"Starting saturation: {sat_full:.4f}")
 
     # Lists for plotting
-    kernel_list = []
-    sat_list = []
-
-    # Record initial point and save RAW file
-    kernel_list.append(k_best)
-    sat_list.append(sat_full)
+    kernel_list: list[int] = [k_best]
+    sat_list: list[float] = [sat_full]
 
     if visualization_flag:
         out_name = f"result_sat{sat_full:.4f}.raw"
         comb_full.astype(np.uint8).tofile(out_name)
         print(f"Saved result to {out_name}")
 
-    # 4) Decrease kernel size until saturation no longer changes
+    # Decrease kernel size until saturation no longer changes
     current_k = k_best
     prev_sat = sat_full
     while current_k > 1:
@@ -501,7 +497,6 @@ if __name__ == "__main__":
         else:
             print(f"Kernel {next_k} -> sat {sat_next:.4f}")
 
-        # Record for plot
         kernel_list.append(next_k)
         sat_list.append(sat_next)
 
@@ -510,12 +505,9 @@ if __name__ == "__main__":
 
         current_k = next_k
         prev_sat = sat_next
-        comb_full = comb_next  # keep latest array
+        comb_full = comb_next
 
-    # ----------------------------------------------------------------------------------
-    # Plot saturation vs kernel size
-    # ----------------------------------------------------------------------------------
-    # Convert kernel size to capillary pressure (Pa)
+    # Plot saturation vs kernel size and save
     theta_rad = math.radians(theta)
     pc_list = [(2 * sigma * math.cos(theta_rad) * 1000) / (k * resolution) for k in kernel_list]
 
@@ -524,17 +516,13 @@ if __name__ == "__main__":
     plt.xlabel("$S_w$")
     plt.ylabel("Capillary pressure (Pa)")
     plt.title("Capillary Pressure vs Wetting Phase Saturation")
-    #plt.grid(True)
     plt.tight_layout()
     plot_name = "saturation_vs_pc.pdf"
     plt.savefig(plot_name, dpi=300)
     print(f"Plot saved to {plot_name}")
 
-    # -----------------------------------------------------------
     # Write numeric results to text file (Pc  Saturation)
-    # -----------------------------------------------------------
     with open("result.txt", "w") as fp:
-        # Header information
         fp.write("input parameters loaded from input.txt\n")
         fp.write("Input Parameters:\n")
         fp.write(f"Input file: {file_path}\n")
@@ -546,18 +534,24 @@ if __name__ == "__main__":
         fp.write("====================================\n")
         fp.write(f"Porous domain porosity: {porosity:.4f}\n")
         fp.write("====================================\n")
-
-        # Data table
         fp.write("Pc(Pa)\t\tSw\n")
         for pc, sw in zip(pc_list, sat_list):
             fp.write(f"{pc:.6f}\t\t{sw:.6f}\n")
         print("Numeric results saved to result.txt")
 
     plt.show()
-
     print("Done.")
 
-    # Optional: quick plot
-    # plt.imshow(comb_full[current_k], cmap="gray")
-    # plt.show()
+
+if __name__ == "__main__":
+    # Select a cross-platform start method for multiprocessing
+    if sys.platform.startswith("win"):
+        # Windows only supports 'spawn'
+        mp.set_start_method("spawn", force=True)
+    else:
+        # On POSIX (Linux/macOS), keep the interpreter default unless user overrides
+        # This avoids issues on recent macOS where 'spawn' is default and recommended
+        pass
+
+    main()
 
