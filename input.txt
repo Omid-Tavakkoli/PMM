@@ -8,9 +8,9 @@ filesize_z = 572
 
 resolution = 8.42        # Microns per voxel
 sigma = 26               # Interfacial tension (mN/m)
-theta = 0                # Contact angle (degrees)
-num_threads = 10         # Number of CPU cores to use
-kernel_search = false    # true: search for kernel size using starting_sat; false: start from starting_kernel
-starting_kernel = 20     # used only if kernel_search=false
+theta = 0                # Contact angle (degrees), limited to below 60
+num_threads = 8          # Number of CPU cores to use
+kernel_search = false    # true: search for kernel size using starting_sat; false: start from
+starting_kernel = 5      # used only if kernel_search=false
 starting_sat = 0.95      # used only if kernel_search=true
 visualization = true     # true: save .RAW fluid distribution per saturation step, false: skip saving
