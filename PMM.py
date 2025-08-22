@@ -487,6 +487,7 @@ def main():
     # Decrease kernel size until saturation no longer changes
     current_k = k_best
     prev_sat = sat_full
+    consecutive_small_changes = 0
     while current_k > 1:
         next_k = current_k - 1
         sat_next, comb_next, mask_global = compute_saturation_parallel(domain_full, next_k, theta, num_workers, mask_global)
@@ -500,7 +501,15 @@ def main():
         kernel_list.append(next_k)
         sat_list.append(sat_next)
 
-        if abs(sat_next - prev_sat) < 1e-6:
+        # Check convergence condition
+        sat_change = abs(sat_next - prev_sat)
+        if sat_change < 1e-6:
+            consecutive_small_changes += 1
+        else:
+            consecutive_small_changes = 0
+            
+        # Break only if we have 4 consecutive small changes AND saturation is not 1.0
+        if consecutive_small_changes >= 4 and sat_next < 1.0:
             break
 
         current_k = next_k
