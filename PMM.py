@@ -486,7 +486,7 @@ def main():
     kernel_list: list[int] = [k_best]
     sat_list: list[float] = [sat_full]
 
-    if visualization_flag:
+    if visualization_flag and sat_full < 1.0:
         out_name = f"result_sat{sat_full:.4f}.raw"
         comb_full.astype(np.uint8).tofile(out_name)
         print(f"Saved result to {out_name}")
@@ -499,9 +499,12 @@ def main():
         next_k = current_k - 1
         sat_next, comb_next, mask_global = compute_saturation_parallel(domain_full, next_k, theta, num_workers, mask_global)
         if visualization_flag:
-            out_name = f"result_sat{sat_next:.4f}.raw"
-            comb_next.astype(np.uint8).tofile(out_name)
-            print(f"Kernel {next_k} -> sat {sat_next:.4f} (saved {out_name})")
+            if sat_next >= 1.0:
+                print(f"Kernel {next_k} -> sat {sat_next:.4f}")
+            else:
+                out_name = f"result_sat{sat_next:.4f}.raw"
+                comb_next.astype(np.uint8).tofile(out_name)
+                print(f"Kernel {next_k} -> sat {sat_next:.4f} (saved {out_name})")
         else:
             print(f"Kernel {next_k} -> sat {sat_next:.4f}")
 
