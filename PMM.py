@@ -364,7 +364,7 @@ def find_best_kernel_size(
         # ------------------------------------------------------------------
         # Update best diff
         # ------------------------------------------------------------------
-        if diff < tol:
+        if diff <= tol:
             best_k = k
             best_diff = diff
             break
@@ -415,9 +415,16 @@ def find_best_kernel_size(
 
                 prev_diff = diff_up
             break
-        # Advance kernel size
+        # Advance kernel size with oscillation and bounds guard
+        next_k = k + step_candidate
+        if next_k in tested:
+            print("Stopping search (oscillation detected).")
+            break
+        if next_k < 1 or next_k > max_kernel_size:
+            print("Stopping search (out of bounds).")
+            break
         step = step_candidate
-        k += step
+        k = next_k
     return best_k, best_diff
 
 def main():
@@ -508,8 +515,8 @@ def main():
         else:
             consecutive_small_changes = 0
             
-        # Break only if we have 4 consecutive small changes AND saturation is not 1.0
-        if consecutive_small_changes >= 4 and sat_next < 1.0:
+        # Break only if we have 3 consecutive small changes AND saturation is not 1.0
+        if consecutive_small_changes >= 3 and sat_next < 1.0:
             break
 
         current_k = next_k
