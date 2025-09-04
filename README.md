@@ -18,14 +18,15 @@ The code generates capillary-pressure curves by performing morphological operati
 ---
 
 ## Installation
-
-### pip
+1) Python 3.9+ recommended.
+2) Install dependencies:
+- **pip**:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### conda
+- **conda**:
 
 ```bash
 conda create -n pmm -c conda-forge python=3.11 numpy scikit-image matplotlib seaborn -y
