@@ -17,6 +17,23 @@ The code generates capillary-pressure curves by performing morphological operati
 
 ---
 
+## Installation
+
+### pip
+
+```bash
+pip install -r requirements.txt
+```
+
+### conda
+
+```bash
+conda create -n pmm -c conda-forge python=3.11 numpy scikit-image matplotlib seaborn -y
+conda activate pmm
+```
+
+---
+
 ## Input files
 
 | File | Purpose |
