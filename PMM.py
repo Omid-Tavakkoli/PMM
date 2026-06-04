@@ -115,9 +115,9 @@ def _morphology_multi_pass(volume: np.ndarray, total_radius: int, op: str) -> np
         step = min(remaining, MAX_SE_RADIUS)
         se = _get_ball(step)
         if op == "dilation":
-            result = ski.morphology.binary_dilation(result, footprint=se)
+            result = ski.morphology.dilation(result, footprint=se)
         elif op == "erosion":
-            result = ski.morphology.binary_erosion(result, footprint=se)
+            result = ski.morphology.erosion(result, footprint=se)
         else:
             raise ValueError(f"Unsupported morphology op: {op}")
         remaining -= step
