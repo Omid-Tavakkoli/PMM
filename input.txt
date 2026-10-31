@@ -14,3 +14,4 @@ kernel_search = false    # true: search for kernel size using starting_sat; fals
 starting_kernel = 5      # used only if kernel_search=false
 starting_sat = 0.95      # used only if kernel_search=true
 visualization = true     # true: save .RAW fluid distribution per saturation step, false: skip saving
+MICP = false             # true: mercury injection capillary pressure (all 6 faces are inlet and outlet), false: inlet z = 0, outlet z = end

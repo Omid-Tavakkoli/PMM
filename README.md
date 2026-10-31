@@ -14,11 +14,12 @@ The code generates capillary-pressure curves by performing morphological operati
 * Adaptive kernel search to reach a target (starting) wetting-phase saturation.
 * Support for starting kernel runs when a search is not required.
 * Trapped wetting phase detection following the algorithm in the paper.
+* Optional MICP mode (`MICP = true`): mercury injection capillary pressure, where all six faces of the sample are both inlet and outlet.
 
 ---
 
 ## Installation
-1) Python 3.9+ recommended.
+1) Python 3.10+ required.
 2) Install dependencies:
 - **pip**:
 
@@ -63,6 +64,7 @@ kernel_search  = true              # true: search, false: starting kernel
 starting_sat   = 0.95              # starting saturation if search is enabled
 starting_kernel = 20               # used only if kernel_search = false
 visualization  = true              # true: save .RAW fluid distribution per saturation step, false: skip saving
+MICP           = false             # true: MICP, all faces are inlet and outlet; false: inlet z = 0, outlet z = end
 ```
 
 ---

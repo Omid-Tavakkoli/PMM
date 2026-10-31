@@ -7,7 +7,7 @@ import math
 import os
 import multiprocessing as mp
 import sys
-from typing import Tuple
+from typing import Sequence, Tuple
 
 sns.set(style="white")
 
@@ -69,9 +69,9 @@ def _validate_and_read_input():
     with open(file_path, "rb") as f:
         raw_data = np.fromfile(f, dtype=np.uint8, count=total_elements)
 
-    porosity = np.sum(raw_data == 0) / (np.sum(raw_data == 0) + np.sum(raw_data == 1))
     domain_full = raw_data.reshape((depth, height, width))
     domain_full[domain_full == 2] = 1  # normalize if present
+    porosity = np.sum(domain_full == 0) / (np.sum(domain_full == 0) + np.sum(domain_full == 1))
 
     return {
         "params": params,
@@ -124,6 +124,38 @@ def _morphology_multi_pass(volume: np.ndarray, total_radius: int, op: str) -> np
     return result
 
 # --------------------------------------------------------------------------------------
+# Boundary faces – inlet (non-wetting reservoir) and outlet (wetting-phase escape)
+# --------------------------------------------------------------------------------------
+
+# Volume is stored as (z, y, x); a face is (axis, slice index), 0 = first slice, -1 = last
+ALL_FACES = [(axis, index) for axis in range(3) for index in (0, -1)]
+
+
+def get_boundary_faces(micp: bool):
+    """Return (inlet_faces, outlet_faces): all six faces for MICP, otherwise z = 0 in, z = end out."""
+    if micp:
+        return ALL_FACES, ALL_FACES
+    return [(0, 0)], [(0, -1)]
+
+
+def _connected_to_faces(phase: np.ndarray, faces: Sequence[Tuple[int, int]]) -> np.ndarray:
+    """Boolean mask of *phase* voxels whose connected cluster touches any of *faces*."""
+    labels, num = measure.label(phase, background=0, return_num=True)
+    face_labels = np.concatenate([np.take(labels, index, axis=axis).ravel() for axis, index in faces])
+    connected = np.zeros(num + 1, dtype=bool)
+    connected[face_labels] = True
+    connected[0] = False  # background
+    return connected[labels]
+
+
+def _trapped_wetting_phase(comb: np.ndarray, outlet_faces: Sequence[Tuple[int, int]]) -> np.ndarray:
+    """Return 1 everywhere except 0 on wetting phase with no path to any outlet face."""
+    wp = comb == 1
+    trapped = np.ones_like(comb, dtype=np.uint8)
+    trapped[wp & ~_connected_to_faces(wp, outlet_faces)] = 0
+    return trapped
+
+# --------------------------------------------------------------------------------------
 # Saturation computation rules
 # --------------------------------------------------------------------------------------
 
@@ -132,32 +164,23 @@ def compute_saturation(
     k: int,
     theta: float,
     mask: np.ndarray | None = None,
+    micp: bool = False,
 ) -> Tuple[float, np.ndarray, np.ndarray]:
     """
     Return (saturation, comb, new_mask) on *domain* with kernel *k*.
 
+    *micp* = True uses all six faces as inlet and outlet.
     """
     theta_rad = math.radians(theta)
     kernel_size_solid = max(round(k * math.cos(theta_rad)), 1)
     kernel_size_nwp   = round(k)
+    inlet_faces, outlet_faces = get_boundary_faces(micp)
 
     # 1) Grain dilation (solid)
     grain_dilation = _morphology_multi_pass(domain, kernel_size_solid, "dilation")
 
-    # 2) Connectivity analysis
-    NW_reservoir = np.zeros((1, domain.shape[1], domain.shape[2]), dtype=np.uint8)
-    ready_pore_labels = np.concatenate((NW_reservoir, grain_dilation), axis=0)
-    pore_labels = measure.label(ready_pore_labels, background=1)
-    value_connected_pores = np.unique(pore_labels[0, :, :])
-
-    pore_labels[(pore_labels != 0) & (pore_labels != value_connected_pores)] = 10
-    pore_labels[pore_labels == value_connected_pores] = 127
-    pore_labels[pore_labels == 0] = 2
-    pore_labels[pore_labels == 10] = 1
-    pore_labels[pore_labels == 127] = 0
-    pore_labels[pore_labels == 2] = 1
-
-    ready_for_nwd = pore_labels[1 : domain.shape[0] + 1]
+    # 2) Connectivity analysis (0 = pore connected to an inlet face, 1 = rest)
+    ready_for_nwd = (~_connected_to_faces(grain_dilation == 0, inlet_faces)).astype(np.uint8)
 
     # 3) Non-wetting phase erosion
     nwp_dilation = _morphology_multi_pass(ready_for_nwd, kernel_size_nwp, "erosion")
@@ -171,20 +194,10 @@ def compute_saturation(
     comb[domain == 1] = 2
 
     # ------------------------------------------------------------------
-    # Identify trapped non-wetting phase and apply to comb
+    # Identify trapped wetting phase and apply to comb
     # ------------------------------------------------------------------
-    wp_reservoir = np.ones((1, domain.shape[1], domain.shape[2]), dtype=np.uint8)
-    ready_pore_labels_2 = np.concatenate((comb, wp_reservoir), axis=0)
-    ready_pore_labels_2[ready_pore_labels_2 == 0] = 2  # treat NWP as background for connectivity
-
-    pore_labels_2 = measure.label(ready_pore_labels_2, background=2)
-    value_connected_pores_2 = np.unique(pore_labels_2[-1, :, :])  # connected to top reservoir slice
-
-    interior_labels = pore_labels_2[:-1]
-    trapped = np.ones_like(domain, dtype=np.uint8)
-    trapped[(interior_labels != 0) & (interior_labels != value_connected_pores_2)] = 0
-
-    comb[trapped == 0] = 1 
+    trapped = _trapped_wetting_phase(comb, outlet_faces)
+    comb[trapped == 0] = 1
 
     # Saturation
     wp = np.sum(comb == 1)
@@ -246,32 +259,23 @@ def compute_saturation_parallel(
     theta: float,
     num_workers: int,
     mask: np.ndarray | None = None,
+    micp: bool = False,
 ) -> Tuple[float, np.ndarray, np.ndarray]:
     """
     Compute saturation and return (sat, comb, new_mask).
 
+    *micp* = True uses all six faces as inlet and outlet.
     """
     theta_rad = math.radians(theta)
     r_solid = max(round(k * math.cos(theta_rad)), 1)
     r_nwp = round(k)
+    inlet_faces, outlet_faces = get_boundary_faces(micp)
 
     # 1) Grain dilation (parallel)
     grain_dilation = _morphology_parallel(domain, r_solid, "dilation", num_workers)
 
-    # 2) Connectivity to non-wetting reservoir (single global labeling)
-    NW_reservoir = np.zeros((1, domain.shape[1], domain.shape[2]), dtype=np.uint8)
-    ready_pore_labels = np.concatenate((NW_reservoir, grain_dilation), axis=0)
-    pore_labels = measure.label(ready_pore_labels, background=1)
-    value_connected_pores = np.unique(pore_labels[0, :, :])
-
-    pore_labels[(pore_labels != 0) & (pore_labels != value_connected_pores)] = 10
-    pore_labels[pore_labels == value_connected_pores] = 127
-    pore_labels[pore_labels == 0] = 2
-    pore_labels[pore_labels == 10] = 1
-    pore_labels[pore_labels == 127] = 0
-    pore_labels[pore_labels == 2] = 1
-
-    ready_for_nwd = pore_labels[1: domain.shape[0] + 1]
+    # 2) Connectivity to non-wetting reservoir (0 = pore connected to an inlet face, 1 = rest)
+    ready_for_nwd = (~_connected_to_faces(grain_dilation == 0, inlet_faces)).astype(np.uint8)
 
     # 3) Non-wetting erosion (parallel)
     nwp_dilation = _morphology_parallel(ready_for_nwd, r_nwp, "erosion", num_workers)
@@ -288,15 +292,8 @@ def compute_saturation_parallel(
     if mask is not None:
         comb[mask == 0] = 1
 
-    # 5) Trapped WP
-    wp_reservoir = np.ones((1, domain.shape[1], domain.shape[2]), dtype=np.uint8)
-    ready_pore_labels_2 = np.concatenate((comb, wp_reservoir), axis=0)
-    ready_pore_labels_2[ready_pore_labels_2 == 0] = 2
-    pore_labels_2 = measure.label(ready_pore_labels_2, background=2)
-    value_connected_pores_2 = np.unique(pore_labels_2[-1, :, :])
-    interior_labels = pore_labels_2[:-1]
-    trapped = np.ones_like(domain, dtype=np.uint8)
-    trapped[(interior_labels != 0) & (interior_labels != value_connected_pores_2)] = 0
+    # 5) Trapped WP (no path to any outlet face)
+    trapped = _trapped_wetting_phase(comb, outlet_faces)
     comb[trapped == 0] = 1  # Apply trapped WP
 
     wp = np.sum(comb == 1)
@@ -317,6 +314,7 @@ def find_best_kernel_size(
     initial_k: int = 20,
     tol: float = 1e-4,
     max_kernel_size: int = 200,
+    micp: bool = False,
 ):
     """Search for kernel size yielding *target_sat* starting from *initial_k*."""
     k = initial_k
@@ -326,7 +324,7 @@ def find_best_kernel_size(
     tested = set()
 
     while k <= max_kernel_size:
-        sat, _, _ = compute_saturation_parallel(domain_test, k, theta, num_workers)
+        sat, _, _ = compute_saturation_parallel(domain_test, k, theta, num_workers, micp=micp)
         tested.add(k)
         diff = abs(sat - target_sat)
         print(f"Kernel {k} -> sat {sat:.4f} (diff {diff:.4f})")
@@ -380,7 +378,7 @@ def find_best_kernel_size(
             for kk in range(k - 1, 0, -1):
                 if kk in tested:
                     continue
-                sat_k, _, _ = compute_saturation_parallel(domain_test, kk, theta, num_workers)
+                sat_k, _, _ = compute_saturation_parallel(domain_test, kk, theta, num_workers, micp=micp)
                 diff_k = abs(sat_k - target_sat)
                 print(f"  Downward {kk} -> sat {sat_k:.4f} (diff {diff_k:.4f})")
                 if diff_k < best_diff:
@@ -396,7 +394,7 @@ def find_best_kernel_size(
             for k_up in range(k + 1, max_kernel_size + 1):
                 if k_up in tested:
                     continue
-                sat_up, _, _ = compute_saturation_parallel(domain_test, k_up, theta, num_workers)
+                sat_up, _, _ = compute_saturation_parallel(domain_test, k_up, theta, num_workers, micp=micp)
                 tested.add(k_up)
                 diff_up = abs(sat_up - target_sat)
                 print(f"  Upward   {k_up} -> sat {sat_up:.4f} (diff {diff_up:.4f})")
@@ -445,6 +443,8 @@ def main():
     starting_kernel_param = params.get("starting_kernel")
     starting_sat_param = params.get("starting_sat")
     visualization_flag = params.get("visualization", "true").strip().lower() == "true"
+    micp_flag = params.get("micp", "false").strip().lower() == "true"
+    micp_text = "true (all faces inlet and outlet)" if micp_flag else "false (inlet z = 0, outlet z = end)"
 
     num_workers = int(params.get("num_threads", mp.cpu_count()))
 
@@ -456,6 +456,7 @@ def main():
     print(f"Contact angle (theta): {theta} degrees")
     print(f"Image resolution: {resolution} micro meter")
     print(f"Num threads = {params.get('num_threads', 'auto')}")
+    print(f"MICP: {micp_text}")
     print("====================================")
     print("Image loaded successfully")
     print(f"Porous domain porosity: {porosity:.4f}")
@@ -467,7 +468,7 @@ def main():
             raise ValueError("'starting_sat' must be provided in input.txt when kernel_search = true")
         target_sat = float(starting_sat_param)
         print(f"Finding kernel size to start the simulation from saturation {target_sat} ...")
-        k_best, diff_best = find_best_kernel_size(domain_full, target_sat, theta, num_workers, initial_k=20)
+        k_best, diff_best = find_best_kernel_size(domain_full, target_sat, theta, num_workers, initial_k=20, micp=micp_flag)
         print("=" * 50)
         print(f"Chosen kernel size to start the simulation: {k_best} (diff {diff_best:.4f})")
     else:
@@ -479,7 +480,7 @@ def main():
 
     # Apply kernel size to full domain
     mask_global = np.ones_like(domain_full, dtype=np.uint8)
-    sat_full, comb_full, mask_global = compute_saturation_parallel(domain_full, k_best, theta, num_workers, mask_global)
+    sat_full, comb_full, mask_global = compute_saturation_parallel(domain_full, k_best, theta, num_workers, mask_global, micp=micp_flag)
     print(f"Starting saturation: {sat_full:.4f}")
 
     # Lists for plotting
@@ -497,7 +498,7 @@ def main():
     consecutive_small_changes = 0
     while current_k > 1:
         next_k = current_k - 1
-        sat_next, comb_next, mask_global = compute_saturation_parallel(domain_full, next_k, theta, num_workers, mask_global)
+        sat_next, comb_next, mask_global = compute_saturation_parallel(domain_full, next_k, theta, num_workers, mask_global, micp=micp_flag)
         if visualization_flag:
             if sat_next >= 1.0:
                 print(f"Kernel {next_k} -> sat {sat_next:.4f}")
@@ -550,6 +551,7 @@ def main():
         fp.write(f"Contact angle (theta): {theta} degrees\n")
         fp.write(f"Image resolution: {resolution} micro meter\n")
         fp.write(f"Num threads = {num_workers}\n")
+        fp.write(f"MICP: {micp_text}\n")
         fp.write("====================================\n")
         fp.write(f"Porous domain porosity: {porosity:.4f}\n")
         fp.write("====================================\n")
